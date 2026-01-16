@@ -1,12 +1,24 @@
-import { createClient, createAdminClient } from '@/lib/supabase-server'
+import { createAdminClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import DashboardClient from './DashboardClient'
+import { cookies } from 'next/headers'
+import { createServerClient } from '@supabase/ssr'
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-  const adminClient = createAdminClient()
-  
   // Get current user
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+      },
+    }
+  )
+  
   const { data: { user } } = await supabase.auth.getUser()
   
   if (!user) {
@@ -16,48 +28,18 @@ export default async function DashboardPage() {
   // Check if superadmin
   const isSuperadmin = user.email === process.env.SUPERADMIN_EMAIL
 
-  // Get user's customer_id from profile (if not superadmin)
-  let customerId = null
-  let customerName = null
-  
-  if (!isSuperadmin) {
-    // Fetch from dashboard_users table
-    const { data: dashboardUser } = await adminClient
-      .from('dashboard_users')
-      .select('customer_id, customers(name)')
-      .eq('user_id', user.id)
-      .single()
-    
-    if (dashboardUser) {
-      customerId = dashboardUser.customer_id
-      customerName = dashboardUser.customers?.name
-    }
-  }
+  // Use admin client to bypass RLS
+  const adminClient = createAdminClient()
 
-  // Fetch sessions based on role
-  let sessionsQuery = adminClient
+  // Fetch sessions - simple query first
+  const { data: sessions, error } = await adminClient
     .from('chat_sessions')
-    .select(`
-      id,
-      customer_id,
-      visitor_id,
-      session_start,
-      session_end,
-      message_count,
-      status,
-      metadata,
-      updated_at,
-      customers(name)
-    `)
-    .order('updated_at', { ascending: false })
+    .select('*')
+    .order('session_start', { ascending: false })
     .limit(100)
 
-  // If not superadmin, filter by customer_id
-  if (!isSuperadmin && customerId) {
-    sessionsQuery = sessionsQuery.eq('customer_id', customerId)
-  }
-
-  const { data: sessions, error } = await sessionsQuery
+  console.log('Sessions error:', error)
+  console.log('Sessions count:', sessions?.length)
 
   // Get all customers for filter (superadmin only)
   let customers = []
@@ -73,8 +55,8 @@ export default async function DashboardPage() {
     <DashboardClient
       user={user}
       isSuperadmin={isSuperadmin}
-      customerId={customerId}
-      customerName={customerName}
+      customerId={null}
+      customerName={null}
       initialSessions={sessions || []}
       customers={customers}
     />
