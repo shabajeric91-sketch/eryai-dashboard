@@ -1,119 +1,113 @@
-'use client'
+// app/login/page.js
+'use client';
 
-import { useState } from 'react'
-import { createClient } from '@/lib/supabase-browser'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase-browser';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const router = useRouter()
-  const supabase = createClient()
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
+    e.preventDefault();
+    setError('');
+    setLoading(true);
 
     try {
+      const supabase = createClient();
+      
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
-      })
+      });
 
-      if (signInError) throw signInError
+      if (signInError) throw signInError;
 
-      // Check MFA status
-      const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+      // ✨ NYTT: Kolla MFA-status efter successful login
+      const { data: factors } = await supabase.auth.mfa.listFactors();
       
-      if (aalData?.currentLevel === 'aal1' && aalData?.nextLevel === 'aal2') {
-        // User has MFA, needs to verify
-        router.push('/mfa/verify')
+      if (factors?.totp && factors.totp.length > 0) {
+        // Användaren har MFA aktiverat, redirecta till verify
+        router.push('/mfa/verify');
       } else {
-        // Check if user needs to set up MFA
-        const { data: factors } = await supabase.auth.mfa.listFactors()
-        if (!factors?.totp || factors.totp.length === 0) {
-          router.push('/mfa/setup')
-        } else {
-          router.push('/dashboard')
-        }
+        // Ingen MFA, redirecta direkt till dashboard
+        router.push('/leads');
       }
+      
+      router.refresh();
+      
     } catch (err) {
-      setError(err.message || 'Inloggningen misslyckades')
-    } finally {
-      setLoading(false)
+      console.error('Login error:', err);
+      setError(err.message || 'Inloggning misslyckades');
+      setLoading(false); // Visa error bara om login misslyckas
     }
-  }
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-eryai-50 to-eryai-100">
-      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-eryai-600">EryAI</h1>
-          <p className="text-gray-500 mt-2">Dashboard</p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 to-white px-4">
+      <div className="max-w-md w-full space-y-8">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">EryAI Sales</h1>
+          <p className="text-gray-600">AI-driven Lead Management</p>
         </div>
 
-        {/* Error message */}
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-sm">
-            {error}
-          </div>
-        )}
+        <div className="bg-white rounded-lg shadow-xl p-8">
+          <h2 className="text-2xl font-bold text-gray-900 mb-6">Logga in</h2>
+          
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              {error}
+            </div>
+          )}
 
-        {/* Login form */}
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-              E-post
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-eryai-500 focus:border-transparent transition"
-              placeholder="din@email.se"
-            />
-          </div>
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                placeholder="eric@eryai.tech"
+                required
+              />
+            </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-              Lösenord
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-eryai-500 focus:border-transparent transition"
-              placeholder="••••••••"
-            />
-          </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Lösenord
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                placeholder="••••••••"
+                required
+              />
+            </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-eryai-600 text-white py-3 rounded-lg font-medium hover:bg-eryai-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Loggar in...' : 'Logga in'}
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 px-4 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Loggar in...' : 'Logga in'}
+            </button>
+          </form>
 
-        {/* Security notice */}
-        <div className="mt-6 p-3 bg-gray-50 rounded-lg">
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-            <span>Skyddad med tvåfaktorsautentisering</span>
+          <div className="mt-6 text-center text-sm text-gray-600">
+            <p>Sales Dashboard för EryAI</p>
+            <p className="mt-1">Endast för auktoriserad personal</p>
           </div>
         </div>
       </div>
     </div>
-  )
+  );
 }
