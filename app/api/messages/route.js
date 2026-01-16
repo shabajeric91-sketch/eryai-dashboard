@@ -26,7 +26,7 @@ export async function GET(request) {
     .from('chat_messages')
     .select('*')
     .eq('session_id', sessionId)
-    .order('created_at', { ascending: true })
+    .order('timestamp', { ascending: true })
 
   if (error) {
     console.error('Messages error:', error)
