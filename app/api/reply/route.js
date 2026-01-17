@@ -8,12 +8,14 @@ export async function POST(request) {
 
     if (!sessionId || !message) {
       return NextResponse.json(
-        { error: 'sessionId och message kravs' },
+        { error: 'sessionId och message krävs' },
         { status: 400 }
       )
     }
 
-    // Skapa Supabase-klient med anvandarens session
+    console.log('Reply API called with sessionId:', sessionId)
+
+    // Skapa Supabase-klient med användarens session
     const cookieStore = await cookies()
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -27,29 +29,54 @@ export async function POST(request) {
       }
     )
 
-    // Verifiera att anvandaren ar inloggad
+    // Verifiera att användaren är inloggad
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: 'Ej inloggad' }, { status: 401 })
     }
 
-    // Anvand admin client for att bypassa RLS
+    console.log('User verified:', user.email)
+
+    // Använd admin client för att bypassa RLS
     const { createClient } = require('@supabase/supabase-js')
     const adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY
     )
 
-    // Hamta session for att fa gastinfo OCH customer-info
+    // Hämta session först (utan join för att undvika FK-problem)
     const { data: session, error: sessionError } = await adminClient
       .from('chat_sessions')
-      .select('*, customers(*)')
+      .select('*')
       .eq('id', sessionId)
       .single()
 
-    if (sessionError || !session) {
+    console.log('Session query result:', { session, sessionError })
+
+    if (sessionError) {
+      console.error('Session error:', sessionError)
+      return NextResponse.json({ 
+        error: 'Session hittades inte', 
+        details: sessionError.message 
+      }, { status: 404 })
+    }
+
+    if (!session) {
       return NextResponse.json({ error: 'Session hittades inte' }, { status: 404 })
     }
+
+    // Hämta customer separat om vi har customer_id
+    let customer = null
+    if (session.customer_id) {
+      const { data: customerData } = await adminClient
+        .from('customers')
+        .select('*')
+        .eq('id', session.customer_id)
+        .single()
+      customer = customerData
+    }
+
+    console.log('Customer:', customer)
 
     // Spara personalens meddelande
     const { data: newMessage, error: messageError } = await adminClient
@@ -58,7 +85,8 @@ export async function POST(request) {
         session_id: sessionId,
         role: 'assistant',
         content: message,
-        sender_type: 'human'
+        sender_type: 'human',
+        timestamp: new Date().toISOString()
       })
       .select()
       .single()
@@ -67,6 +95,8 @@ export async function POST(request) {
       console.error('Failed to save message:', messageError)
       return NextResponse.json({ error: 'Kunde inte spara meddelande' }, { status: 500 })
     }
+
+    console.log('Message saved:', newMessage.id)
 
     // Uppdatera session
     await adminClient
@@ -83,14 +113,16 @@ export async function POST(request) {
       .update({ status: 'handled' })
       .eq('session_id', sessionId)
 
-    // Skicka email till gasten om vi har deras email
+    // Skicka email till gästen om vi har deras email
     const guestEmail = session.metadata?.guest_email
-    const customerSlug = session.customers?.slug || 'bella-italia'
-    const customerName = session.customers?.name || 'Bella Italia'
+    const customerSlug = customer?.slug || 'bella-italia'
+    const customerName = customer?.name || 'Bella Italia'
     
+    console.log('Guest email:', guestEmail)
+
     if (guestEmail) {
       await sendGuestReplyEmail(guestEmail, {
-        guestName: session.metadata?.guest_name || 'Gast',
+        guestName: session.metadata?.guest_name || 'Gäst',
         message: message,
         sessionId: sessionId,
         customerSlug: customerSlug,
@@ -106,11 +138,11 @@ export async function POST(request) {
 
   } catch (error) {
     console.error('Reply API error:', error)
-    return NextResponse.json({ error: 'Serverfel' }, { status: 500 })
+    return NextResponse.json({ error: 'Serverfel', details: error.message }, { status: 500 })
   }
 }
 
-// Skicka email till gasten nar personal svarar
+// Skicka email till gästen när personal svarar
 async function sendGuestReplyEmail(guestEmail, data) {
   const RESEND_API_KEY = process.env.RESEND_API_KEY
   if (!RESEND_API_KEY) {
@@ -118,7 +150,7 @@ async function sendGuestReplyEmail(guestEmail, data) {
     return
   }
 
-  // Bygg direktlank till chatten
+  // Bygg direktlänk till chatten
   const chatUrl = `https://${data.customerSlug}.eryai.tech?chat=open`
 
   try {
@@ -132,7 +164,7 @@ async function sendGuestReplyEmail(guestEmail, data) {
         from: `${data.customerName} <sofia@eryai.tech>`,
         to: guestEmail,
         reply_to: 'info@bellaitalia.se',
-        subject: `Svar fran ${data.customerName}`,
+        subject: `Svar från ${data.customerName}`,
         html: `
           <!DOCTYPE html>
           <html>
@@ -168,7 +200,7 @@ async function sendGuestReplyEmail(guestEmail, data) {
               </div>
               <div class="content">
                 <p class="message">Hej ${data.guestName}!</p>
-                <p class="message">Vi har svarat pa ditt meddelande:</p>
+                <p class="message">Vi har svarat på ditt meddelande:</p>
                 
                 <div class="message-box">
                   <p style="margin: 0; white-space: pre-wrap;">${escapeHtml(data.message)}</p>
@@ -176,18 +208,18 @@ async function sendGuestReplyEmail(guestEmail, data) {
 
                 <div class="cta-container">
                   <a href="${chatUrl}" class="cta-button">
-                    Oppna chatten for att svara
+                    Öppna chatten för att svara
                   </a>
                 </div>
 
                 <p class="note">
-                  Du kan aven ringa oss pa <strong>08-555 1234</strong> om du har fragor.
+                  Du kan även ringa oss på <strong>08-555 1234</strong> om du har frågor.
                 </p>
                 
-                <p class="message" style="margin-top: 24px;">Varma halsningar,<br><em>Teamet pa ${data.customerName}</em></p>
+                <p class="message" style="margin-top: 24px;">Varma hälsningar,<br><em>Teamet på ${data.customerName}</em></p>
               </div>
               <div class="footer">
-                ${data.customerName} - Strandvagen 42, Stockholm - 08-555 1234<br>
+                ${data.customerName} · Strandvägen 42, Stockholm · 08-555 1234<br>
                 <small>Detta mail skickades via EryAI.tech</small>
               </div>
             </div>
