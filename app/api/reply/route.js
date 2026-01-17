@@ -8,12 +8,12 @@ export async function POST(request) {
 
     if (!sessionId || !message) {
       return NextResponse.json(
-        { error: 'sessionId och message krävs' },
+        { error: 'sessionId och message kravs' },
         { status: 400 }
       )
     }
 
-    // Skapa Supabase-klient med användarens session
+    // Skapa Supabase-klient med anvandarens session
     const cookieStore = await cookies()
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -27,23 +27,23 @@ export async function POST(request) {
       }
     )
 
-    // Verifiera att användaren är inloggad
+    // Verifiera att anvandaren ar inloggad
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: 'Ej inloggad' }, { status: 401 })
     }
 
-    // Använd admin client för att bypassa RLS
+    // Anvand admin client for att bypassa RLS
     const { createClient } = require('@supabase/supabase-js')
     const adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY
     )
 
-    // Hämta session för att få gästinfo
+    // Hamta session for att fa gastinfo OCH customer-info
     const { data: session, error: sessionError } = await adminClient
       .from('chat_sessions')
-      .select('*')
+      .select('*, customers(*)')
       .eq('id', sessionId)
       .single()
 
@@ -83,13 +83,18 @@ export async function POST(request) {
       .update({ status: 'handled' })
       .eq('session_id', sessionId)
 
-    // Skicka email till gästen om vi har deras email
+    // Skicka email till gasten om vi har deras email
     const guestEmail = session.metadata?.guest_email
+    const customerSlug = session.customers?.slug || 'bella-italia'
+    const customerName = session.customers?.name || 'Bella Italia'
+    
     if (guestEmail) {
       await sendGuestReplyEmail(guestEmail, {
-        guestName: session.metadata?.guest_name || 'Gäst',
+        guestName: session.metadata?.guest_name || 'Gast',
         message: message,
-        sessionId: sessionId
+        sessionId: sessionId,
+        customerSlug: customerSlug,
+        customerName: customerName
       })
     }
 
@@ -105,13 +110,16 @@ export async function POST(request) {
   }
 }
 
-// Skicka email till gästen när personal svarar
+// Skicka email till gasten nar personal svarar
 async function sendGuestReplyEmail(guestEmail, data) {
   const RESEND_API_KEY = process.env.RESEND_API_KEY
   if (!RESEND_API_KEY) {
     console.log('RESEND_API_KEY not set, skipping guest reply email')
     return
   }
+
+  // Bygg direktlank till chatten
+  const chatUrl = `https://${data.customerSlug}.eryai.tech?chat=open`
 
   try {
     const response = await fetch('https://api.resend.com/emails', {
@@ -121,10 +129,10 @@ async function sendGuestReplyEmail(guestEmail, data) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        from: 'Bella Italia <sofia@eryai.tech>',
+        from: `${data.customerName} <sofia@eryai.tech>`,
         to: guestEmail,
         reply_to: 'info@bellaitalia.se',
-        subject: '💬 Svar från Bella Italia',
+        subject: `Svar fran ${data.customerName}`,
         html: `
           <!DOCTYPE html>
           <html>
@@ -137,28 +145,49 @@ async function sendGuestReplyEmail(guestEmail, data) {
               .content { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
               .message-box { background: #f0fdf4; border-left: 4px solid #2d3e2f; padding: 20px; margin: 20px 0; }
               .message { font-size: 16px; }
+              .cta-button { 
+                display: inline-block; 
+                background: #d4a574; 
+                color: #1c1c1c !important; 
+                padding: 16px 32px; 
+                text-decoration: none; 
+                border-radius: 8px; 
+                font-weight: 600; 
+                margin-top: 20px;
+                text-align: center;
+              }
+              .cta-container { text-align: center; margin-top: 24px; }
               .footer { text-align: center; padding: 20px; color: #666; font-size: 14px; }
+              .note { font-size: 13px; color: #888; margin-top: 16px; text-align: center; }
             </style>
           </head>
           <body>
             <div class="container">
               <div class="header">
-                <h1>🍝 Bella Italia</h1>
+                <h1>${data.customerName}</h1>
               </div>
               <div class="content">
                 <p class="message">Hej ${data.guestName}!</p>
-                <p class="message">Vi har svarat på ditt meddelande:</p>
+                <p class="message">Vi har svarat pa ditt meddelande:</p>
                 
                 <div class="message-box">
-                  <p style="margin: 0; white-space: pre-wrap;">${data.message}</p>
+                  <p style="margin: 0; white-space: pre-wrap;">${escapeHtml(data.message)}</p>
                 </div>
 
-                <p class="message">Har du fler frågor? Svara gärna på detta mail eller ring oss på <strong>08-555 1234</strong>.</p>
+                <div class="cta-container">
+                  <a href="${chatUrl}" class="cta-button">
+                    Oppna chatten for att svara
+                  </a>
+                </div>
+
+                <p class="note">
+                  Du kan aven ringa oss pa <strong>08-555 1234</strong> om du har fragor.
+                </p>
                 
-                <p class="message">Varma hälsningar,<br><em>Teamet på Bella Italia</em></p>
+                <p class="message" style="margin-top: 24px;">Varma halsningar,<br><em>Teamet pa ${data.customerName}</em></p>
               </div>
               <div class="footer">
-                Bella Italia · Strandvägen 42, Stockholm · 08-555 1234<br>
+                ${data.customerName} - Strandvagen 42, Stockholm - 08-555 1234<br>
                 <small>Detta mail skickades via EryAI.tech</small>
               </div>
             </div>
@@ -177,4 +206,16 @@ async function sendGuestReplyEmail(guestEmail, data) {
   } catch (error) {
     console.error('Failed to send guest reply email:', error)
   }
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  }
+  return text.replace(/[&<>"']/g, m => map[m])
 }
