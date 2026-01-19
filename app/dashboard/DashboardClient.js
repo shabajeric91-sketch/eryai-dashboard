@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { useRouter } from 'next/navigation'
+import PushNotificationSettings from '@/app/components/PushNotificationSettings'
 
 export default function DashboardClient({ 
   user, 
@@ -18,12 +19,12 @@ export default function DashboardClient({
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [filterCustomer, setFilterCustomer] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [showSettings, setShowSettings] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
   // Hjälpfunktion för att hämta gästnamn
   const getGuestDisplayName = (session) => {
-    // Prioritet: metadata.guest_name > visitor_id > "Anonym besökare"
     if (session.metadata?.guest_name) {
       return session.metadata.guest_name
     }
@@ -98,7 +99,6 @@ export default function DashboardClient({
   }
 
   const getStatusBadge = (session) => {
-    // Visa "Behöver svar" om needs_human är true
     if (session.needs_human) {
       return (
         <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
@@ -137,6 +137,13 @@ export default function DashboardClient({
           </div>
           
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="text-gray-500 hover:text-gray-700"
+              title="Inställningar"
+            >
+              ⚙️
+            </button>
             <span className="text-sm text-gray-500">{user.email}</span>
             <button
               onClick={handleLogout}
@@ -147,6 +154,24 @@ export default function DashboardClient({
           </div>
         </div>
       </header>
+
+      {/* Settings panel */}
+      {showSettings && (
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="bg-white rounded-xl shadow-sm border p-4 mb-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-gray-800">Inställningar</h2>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            <PushNotificationSettings userId={user.id} customerId={customerId} />
+          </div>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto p-4">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -208,7 +233,6 @@ export default function DashboardClient({
                           {getStatusBadge(session)}
                         </div>
                         
-                        {/* Visa kontaktinfo om det finns */}
                         {guestContact && (
                           <p className="text-xs text-gray-500 truncate mb-1">
                             {guestContact}
@@ -295,7 +319,6 @@ export default function DashboardClient({
                                   : 'chat-bubble-assistant'
                               }
                             >
-                              {/* Visa vem som skickade (för AI/Human) */}
                               {!isUser && (
                                 <p className={`text-xs font-semibold mb-1 ${
                                   isHuman ? 'text-green-700' : 'text-gray-500'
@@ -316,7 +339,6 @@ export default function DashboardClient({
                     )}
                   </div>
 
-                  {/* Quick action footer */}
                   {selectedSession.needs_human && (
                     <div className="p-4 border-t bg-amber-50">
                       <div className="flex items-center justify-between">
