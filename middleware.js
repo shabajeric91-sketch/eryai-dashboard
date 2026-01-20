@@ -2,6 +2,13 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 
 export async function middleware(request) {
+  const path = request.nextUrl.pathname
+
+  // Skip middleware for API routes - de hanterar egen auth
+  if (path.startsWith('/api/')) {
+    return NextResponse.next()
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   })
@@ -31,8 +38,6 @@ export async function middleware(request) {
 
   // Refresh session
   const { data: { user } } = await supabase.auth.getUser()
-
-  const path = request.nextUrl.pathname
 
   // Public routes - no auth required
   const publicRoutes = ['/login', '/auth/callback']
