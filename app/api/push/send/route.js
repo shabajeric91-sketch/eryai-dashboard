@@ -15,6 +15,18 @@ webpush.setVapidDetails(
 
 export async function POST(request) {
   try {
+    // Validate internal API key
+    const apiKey = request.headers.get('X-Internal-API-Key');
+    const validKey = process.env.INTERNAL_API_KEY;
+
+    if (!apiKey || apiKey !== validKey) {
+      console.error('Push API: Invalid or missing API key');
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
     const { customerId, userId, title, body, data } = await request.json();
 
     if (!title || !body) {
@@ -43,12 +55,16 @@ export async function POST(request) {
     if (error) throw error;
 
     if (!subscriptions || subscriptions.length === 0) {
+      console.log('Push API: No subscriptions found for', customerId || userId);
       return NextResponse.json({ 
         success: true, 
         sent: 0,
+        total: 0,
         message: 'No subscriptions found' 
       });
     }
+
+    console.log(`Push API: Found ${subscriptions.length} subscriptions`);
 
     const payload = JSON.stringify({
       title,
@@ -73,12 +89,14 @@ export async function POST(request) {
           );
           return { success: true, endpoint: sub.endpoint };
         } catch (err) {
+          console.error('Push send error:', err.statusCode, err.message);
           // Ta bort ogiltiga subscriptions
           if (err.statusCode === 410 || err.statusCode === 404) {
             await supabase
               .from('push_subscriptions')
               .delete()
               .eq('endpoint', sub.endpoint);
+            console.log('Removed invalid subscription:', sub.endpoint);
           }
           return { success: false, endpoint: sub.endpoint, error: err.message };
         }
@@ -87,11 +105,14 @@ export async function POST(request) {
 
     const sent = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
 
+    console.log(`Push API: Sent ${sent}/${subscriptions.length}`);
+
     return NextResponse.json({ 
       success: true, 
       sent,
       total: subscriptions.length 
     });
+
   } catch (error) {
     console.error('Send push error:', error);
     return NextResponse.json(
