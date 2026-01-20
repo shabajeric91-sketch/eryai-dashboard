@@ -4,7 +4,11 @@ import DashboardClient from './DashboardClient'
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardPage() {
+  console.log('🏠 DashboardPage loading...')
+  
   // Get current user
   const cookieStore = await cookies()
   const supabase = createServerClient(
@@ -22,11 +26,15 @@ export default async function DashboardPage() {
   const { data: { user } } = await supabase.auth.getUser()
   
   if (!user) {
+    console.log('🏠 No user, redirecting to login')
     redirect('/login')
   }
 
+  console.log('🏠 User:', user.email)
+
   // Check if superadmin
   const isSuperadmin = user.email === process.env.SUPERADMIN_EMAIL
+  console.log('🏠 Is superadmin:', isSuperadmin)
 
   // Use admin client to bypass RLS
   const adminClient = createAdminClient()
@@ -36,17 +44,21 @@ export default async function DashboardPage() {
   let customerName = null
 
   if (!isSuperadmin) {
-    const { data: dashboardUser } = await adminClient
+    const { data: dashboardUser, error: duError } = await adminClient
       .from('dashboard_users')
       .select('customer_id, customers(id, name)')
       .eq('user_id', user.id)
       .single()
+    
+    console.log('🏠 Dashboard user lookup:', { dashboardUser, error: duError })
     
     if (dashboardUser) {
       customerId = dashboardUser.customer_id
       customerName = dashboardUser.customers?.name || null
     }
   }
+
+  console.log('🏠 CustomerId:', customerId, 'CustomerName:', customerName)
 
   // Fetch sessions - filter by customer if not superadmin
   let sessionsQuery = adminClient
@@ -61,8 +73,9 @@ export default async function DashboardPage() {
 
   const { data: sessions, error } = await sessionsQuery
 
-  console.log('Sessions error:', error)
-  console.log('Sessions count:', sessions?.length)
+  console.log('🏠 Sessions error:', error)
+  console.log('🏠 Sessions count:', sessions?.length)
+  console.log('🏠 First session:', sessions?.[0])
 
   // Get all customers for filter (superadmin only)
   let customers = []
