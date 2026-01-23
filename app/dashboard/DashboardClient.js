@@ -230,7 +230,7 @@ export default function DashboardClient({
   const formatTime = (timestamp) => {
     const date = new Date(timestamp)
     const now = new Date()
-    const diffMs = now - date
+    const diffMs = now.getTime() - date.getTime()
     const diffMins = Math.floor(diffMs / 60000)
     const diffHours = Math.floor(diffMs / 3600000)
     const diffDays = Math.floor(diffMs / 86400000)
@@ -677,7 +677,7 @@ export default function DashboardClient({
         {activeView === 'notifications' && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Push-notiser</h2>
-            <PushNotificationSettings customerId={selectedCustomerId || initialCustomerId} />
+            <PushNotificationSettings userId={user.id} customerId={selectedCustomerId || initialCustomerId} />
           </div>
         )}
 
