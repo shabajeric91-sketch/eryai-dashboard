@@ -62,8 +62,9 @@ export default async function DashboardPage() {
     customers = data || []
     if (customers.length > 0) {
       initialCustomerId = null // Show "Alla kunder" first
-      customerPlan = customers[0].plan || 'starter'
-      customerLogo = customers[0].logo_url
+      const firstCustomer = customers[0]
+      customerPlan = firstCustomer?.plan || 'starter'
+      customerLogo = firstCustomer?.logo_url || null
     }
     userRole = 'superadmin'
   } else {
@@ -113,8 +114,9 @@ export default async function DashboardPage() {
 
       if (customers.length > 0) {
         initialCustomerId = null // Show "Alla kunder" first
-        customerPlan = customers[0].plan || customerPlan
-        customerLogo = customers[0].logo_url
+        const firstCustomer = customers[0]
+        customerPlan = firstCustomer?.plan || customerPlan
+        customerLogo = firstCustomer?.logo_url || null
       }
     } else {
       // Fallback to dashboard_users
