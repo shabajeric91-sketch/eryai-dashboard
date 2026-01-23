@@ -34,20 +34,22 @@ export default function DashboardClient({
   const router = useRouter()
   const supabase = createClient()
 
-  // Get current customer info
-  const currentCustomer = customers.find(c => c.id === selectedCustomerId) || customers[0]
-  const customerName = currentCustomer?.name || 'Dashboard'
-  const currentCustomerLogo = currentCustomer?.logo_url || customerLogo
+  // Get current customer info - FIX: null when "Alla" is selected
+  const currentCustomer = selectedCustomerId ? customers.find(c => c.id === selectedCustomerId) : null
+  const isAllCustomersView = !selectedCustomerId && customers.length > 1
+  const customerName = currentCustomer?.name || (isAllCustomersView ? 'Alla kunder' : customers[0]?.name || 'Dashboard')
+  const currentCustomerLogo = currentCustomer?.logo_url || null
 
   // Check admin access
   const canAccessAdmin = isSuperadmin || userRole === 'admin' || userRole === 'owner'
 
-  // Filtered sessions
+  // Filtered sessions - FIX: show all when selectedCustomerId is null
   const filteredSessions = sessions.filter(session => {
     const matchesSearch = searchQuery === '' || 
       (session.guest_name || 'Anonym besökare').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (session.customer?.name || '').toLowerCase().includes(searchQuery.toLowerCase())
     
+    // When selectedCustomerId is null/empty, show all sessions
     const matchesCustomer = !selectedCustomerId || session.customer_id === selectedCustomerId
     const matchesUnread = !showOnlyUnread || !session.is_read
     
@@ -272,7 +274,7 @@ export default function DashboardClient({
                 </div>
               </div>
               
-              {/* Divider + Customer branding */}
+              {/* Divider + Customer branding - Only show when a specific customer is selected */}
               {currentCustomer && (
                 <div className="flex items-center gap-3 ml-4 pl-4 border-l border-gray-200">
                   {currentCustomerLogo ? (
@@ -287,6 +289,18 @@ export default function DashboardClient({
                     </div>
                   )}
                   <span className="text-sm font-medium text-gray-700 hidden sm:block">{customerName}</span>
+                </div>
+              )}
+              
+              {/* Show "Alla kunder" badge when viewing all */}
+              {isAllCustomersView && (
+                <div className="flex items-center gap-2 ml-4 pl-4 border-l border-gray-200">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-gray-400 to-gray-600 flex items-center justify-center text-white font-semibold text-sm shadow-sm ring-2 ring-white">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                  </div>
+                  <span className="text-sm font-medium text-gray-700 hidden sm:block">Alla kunder</span>
                 </div>
               )}
             </div>
@@ -468,7 +482,7 @@ export default function DashboardClient({
                               )}
                             </div>
                             <p className="text-sm text-purple-600 font-medium truncate">
-                              {session.customer?.name || customerName}
+                              {session.customer?.name || (currentCustomer?.name || 'Okänd kund')}
                             </p>
                             <div className="flex items-center justify-between mt-1">
                               <span className="text-xs text-gray-500">
