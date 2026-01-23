@@ -7,8 +7,9 @@ import { createServerClient } from '@supabase/ssr'
 export const dynamic = 'force-dynamic'
 
 export default async function DashboardPage() {
-  // Get current user
   const cookieStore = await cookies()
+  
+  // Create user client for auth
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
@@ -20,37 +21,53 @@ export default async function DashboardPage() {
       },
     }
   )
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
   
-  const { data: { user } } = await supabase.auth.getUser()
-  
-  if (!user) {
+  if (authError || !user) {
     redirect('/login')
   }
 
-  // Use admin client to bypass RLS
+  // Check MFA
+  const { data: { currentLevel } } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+  if (currentLevel !== 'aal2') {
+    redirect('/mfa/verify')
+  }
+
+  // Use admin client for data fetching
   const adminClient = createAdminClient()
 
-  // Check if superadmin (from superadmins table)
+  // Check if superadmin
   const { data: superadminData } = await adminClient
     .from('superadmins')
     .select('id')
-    .eq('email', user.email)
+    .eq('user_id', user.id)
     .single()
   
   const isSuperadmin = !!superadminData
 
-  // Get user's memberships and access
-  let customerId = null
-  let customerName = null
+  let customers = []
+  let initialCustomerId = null
   let customerPlan = 'starter'
   let userRole = 'member'
-  let organizationId = null
-  let accessibleCustomerIds = []
+  let customerLogo = null
+  let teamMembers = []
 
   if (isSuperadmin) {
-    userRole = 'owner' // Superadmin has full access
+    // Superadmin sees all customers with logo_url
+    const { data } = await adminClient
+      .from('customers')
+      .select('id, name, slug, plan, logo_url')
+      .order('name')
+    customers = data || []
+    if (customers.length > 0) {
+      initialCustomerId = customers[0].id
+      customerPlan = customers[0].plan || 'starter'
+      customerLogo = customers[0].logo_url
+    }
+    userRole = 'superadmin'
   } else {
-    // Get user's memberships
+    // Check user_memberships for org-level access
     const { data: memberships } = await adminClient
       .from('user_memberships')
       .select(`
@@ -58,117 +75,148 @@ export default async function DashboardPage() {
         organization_id,
         customer_id,
         organizations(id, name),
-        customers(id, name, plan)
+        customers(id, name, slug, plan, logo_url)
       `)
       .eq('user_id', user.id)
 
     if (memberships && memberships.length > 0) {
-      // Check if user has org-level access (customer_id is null)
-      const orgMembership = memberships.find(m => m.organization_id && !m.customer_id)
+      const orgMembership = memberships.find(m => m.organization_id)
       
       if (orgMembership) {
-        // Org-level access - can see all customers in org
-        organizationId = orgMembership.organization_id
-        userRole = orgMembership.role || 'admin'
-        
-        // Get all customers in this org
+        // User has org access - get all customers in org
         const { data: orgCustomers } = await adminClient
           .from('customers')
-          .select('id, name, plan')
-          .eq('organization_id', organizationId)
+          .select('id, name, slug, plan, logo_url')
+          .eq('organization_id', orgMembership.organization_id)
+          .order('name')
         
-        accessibleCustomerIds = orgCustomers?.map(c => c.id) || []
-        
-        // Use first customer's plan as default (or highest plan)
-        if (orgCustomers && orgCustomers.length > 0) {
-          customerPlan = orgCustomers[0].plan || 'starter'
-        }
+        customers = orgCustomers || []
+        userRole = orgMembership.role || 'member'
       } else {
-        // Customer-level access only
-        const customerMembership = memberships.find(m => m.customer_id)
-        if (customerMembership) {
-          customerId = customerMembership.customer_id
-          customerName = customerMembership.customers?.name || null
-          customerPlan = customerMembership.customers?.plan || 'starter'
-          userRole = customerMembership.role || 'member'
-          accessibleCustomerIds = [customerId]
-        }
+        // Direct customer access
+        customers = memberships
+          .filter(m => m.customers)
+          .map(m => ({
+            id: m.customers.id,
+            name: m.customers.name,
+            slug: m.customers.slug,
+            plan: m.customers.plan,
+            logo_url: m.customers.logo_url
+          }))
+        userRole = memberships[0]?.role || 'member'
       }
-    }
-    
-    // Also check dashboard_users table (legacy/fallback)
-    if (accessibleCustomerIds.length === 0) {
+
+      if (customers.length > 0) {
+        initialCustomerId = customers[0].id
+        customerPlan = customers[0].plan || 'starter'
+        customerLogo = customers[0].logo_url
+      }
+    } else {
+      // Fallback to dashboard_users
       const { data: dashboardUser } = await adminClient
         .from('dashboard_users')
-        .select('customer_id, role, customers(id, name, plan)')
+        .select('customer_id, customers(id, name, slug, plan, logo_url)')
         .eq('user_id', user.id)
         .single()
-      
-      if (dashboardUser) {
-        customerId = dashboardUser.customer_id
-        customerName = dashboardUser.customers?.name || null
-        customerPlan = dashboardUser.customers?.plan || 'starter'
-        userRole = dashboardUser.role || 'member'
-        accessibleCustomerIds = [customerId]
+
+      if (dashboardUser?.customers) {
+        customers = [{
+          id: dashboardUser.customers.id,
+          name: dashboardUser.customers.name,
+          slug: dashboardUser.customers.slug,
+          plan: dashboardUser.customers.plan,
+          logo_url: dashboardUser.customers.logo_url
+        }]
+        initialCustomerId = dashboardUser.customer_id
+        customerPlan = dashboardUser.customers.plan || 'starter'
+        customerLogo = dashboardUser.customers.logo_url
       }
     }
   }
 
-  // Fetch sessions - exclude deleted
+  // Fetch sessions
   let sessionsQuery = adminClient
     .from('chat_sessions')
-    .select('*')
-    .neq('status', 'deleted')
+    .select(`
+      id,
+      customer_id,
+      guest_name,
+      guest_email,
+      created_at,
+      updated_at,
+      is_read,
+      assigned_to,
+      assigned_type,
+      deleted_at,
+      customer:customers(name, slug)
+    `)
+    .is('deleted_at', null)
     .order('updated_at', { ascending: false })
     .limit(100)
 
-  if (isSuperadmin) {
-    // Superadmin sees ALL sessions
-  } else if (accessibleCustomerIds.length > 0) {
-    // User with access - filter by their customers, hide suspicious
-    sessionsQuery = sessionsQuery
-      .in('customer_id', accessibleCustomerIds)
-      .or('suspicious.is.null,suspicious.eq.false')
-  } else {
-    // No access - return empty
-    sessionsQuery = sessionsQuery.eq('customer_id', '00000000-0000-0000-0000-000000000000')
+  if (!isSuperadmin && customers.length > 0) {
+    const customerIds = customers.map(c => c.id)
+    sessionsQuery = sessionsQuery.in('customer_id', customerIds)
   }
 
   const { data: sessions } = await sessionsQuery
 
-  // Add is_read default if not present (backwards compatibility)
-  const sessionsWithDefaults = (sessions || []).map(s => ({
+  // Add message count and default is_read
+  const sessionsWithCount = (sessions || []).map(s => ({
     ...s,
-    is_read: s.is_read ?? true
+    is_read: s.is_read ?? true,
+    message_count: 0
   }))
 
-  // Get all customers for filter (superadmin or org-level access)
-  let customers = []
-  if (isSuperadmin) {
-    const { data: allCustomers } = await adminClient
-      .from('customers')
-      .select('id, name, plan')
-      .order('name')
-    customers = allCustomers || []
-  } else if (organizationId) {
-    const { data: orgCustomers } = await adminClient
-      .from('customers')
-      .select('id, name, plan')
-      .eq('organization_id', organizationId)
-      .order('name')
-    customers = orgCustomers || []
+  // Fetch team members for assignment
+  if (initialCustomerId) {
+    const { data: members } = await adminClient
+      .from('user_memberships')
+      .select(`
+        user_id,
+        role,
+        users:user_id(id, email)
+      `)
+      .eq('customer_id', initialCustomerId)
+
+    // Also check dashboard_users as fallback
+    const { data: dashboardMembers } = await adminClient
+      .from('dashboard_users')
+      .select('user_id')
+      .eq('customer_id', initialCustomerId)
+
+    const allMemberIds = new Set([
+      ...(members || []).map(m => m.user_id),
+      ...(dashboardMembers || []).map(m => m.user_id)
+    ])
+
+    // Get user details
+    if (allMemberIds.size > 0) {
+      const { data: userProfiles } = await adminClient
+        .from('user_profiles')
+        .select('user_id, name, email')
+        .in('user_id', Array.from(allMemberIds))
+
+      teamMembers = (userProfiles || []).map(p => ({
+        id: p.user_id,
+        name: p.name,
+        email: p.email,
+        role: members?.find(m => m.user_id === p.user_id)?.role || 'member'
+      }))
+    }
   }
 
   return (
     <DashboardClient
       user={user}
       isSuperadmin={isSuperadmin}
-      customerId={customerId}
-      customerName={customerName}
+      customers={customers}
+      initialSessions={sessionsWithCount}
+      initialCustomerId={initialCustomerId}
+      teamMembers={teamMembers}
       customerPlan={customerPlan}
       userRole={userRole}
-      initialSessions={sessionsWithDefaults}
-      customers={customers}
+      customerLogo={customerLogo}
     />
   )
 }
