@@ -109,11 +109,15 @@ export async function GET(request) {
       profiles?.forEach(p => emailMap.set(p.user_id, p.email))
     }
 
-    const enrichedUsers = users?.map(u => ({
-      ...u,
-      email: emailMap.get(u.user_id) || u.user_id.slice(0, 8) + '...',
-      team_name: u.teams?.name || null
-    })) || []
+    const enrichedUsers = users?.map(u => {
+      // Handle potential array from Supabase join
+      const teamData = Array.isArray(u.teams) ? u.teams[0] : u.teams
+      return {
+        ...u,
+        email: emailMap.get(u.user_id) || u.user_id.slice(0, 8) + '...',
+        team_name: teamData?.name || null
+      }
+    }) || []
 
     // Also get pending invites
     const { data: invites } = await adminClient
@@ -180,7 +184,7 @@ export async function POST(request) {
       .select('*', { count: 'exact', head: true })
       .eq('customer_id', customer_id)
 
-    if (count >= limit) {
+    if (count && count >= limit) {
       return NextResponse.json({ 
         error: `Du har nått gränsen på ${limit} användare för din plan. Uppgradera för att lägga till fler.` 
       }, { status: 400 })
