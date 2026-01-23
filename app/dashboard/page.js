@@ -126,17 +126,22 @@ export default async function DashboardPage() {
         .eq('user_id', user.id)
         .single()
 
-      if (dashboardUser?.customers) {
+      // Handle potential array from Supabase join
+      const customerData = Array.isArray(dashboardUser?.customers) 
+        ? dashboardUser.customers[0] 
+        : dashboardUser?.customers
+
+      if (customerData) {
         customers = [{
-          id: dashboardUser.customers.id,
-          name: dashboardUser.customers.name,
-          slug: dashboardUser.customers.slug,
-          plan: dashboardUser.customers.plan,
-          logo_url: dashboardUser.customers.logo_url
+          id: customerData.id,
+          name: customerData.name,
+          slug: customerData.slug,
+          plan: customerData.plan,
+          logo_url: customerData.logo_url
         }]
         initialCustomerId = dashboardUser.customer_id
-        customerPlan = dashboardUser.customers.plan || 'starter'
-        customerLogo = dashboardUser.customers.logo_url
+        customerPlan = customerData.plan || 'starter'
+        customerLogo = customerData.logo_url || null
       }
     }
   }
